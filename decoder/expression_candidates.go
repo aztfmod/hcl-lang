@@ -13,16 +13,25 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
-func (d *Decoder) attrValueCandidatesAtPos(attr *hclsyntax.Attribute, schema *schema.AttributeSchema, pos hcl.Pos) (lang.Candidates, error) {
-	constraints, rng := constraintsAtPos(attr.Expr, ExprConstraints(schema.Expr), pos)
+func (d *Decoder) attrValueCandidatesAtPos(attr *hclsyntax.Attribute, schema *schema.AttributeSchema, outerBodyRng hcl.Range, pos hcl.Pos) (lang.Candidates, error) {
+	constraints, editRng := constraintsAtPos(attr.Expr, ExprConstraints(schema.Expr), pos)
 	if len(constraints) > 0 {
-		return d.expressionCandidatesAtPos(constraints, rng)
+		prefixRng := editRng
+		prefixRng.End = pos
+		return d.expressionCandidatesAtPos(constraints, outerBodyRng, prefixRng, editRng)
 	}
 	return lang.ZeroCandidates(), nil
 }
 
 func constraintsAtPos(expr hcl.Expression, constraints ExprConstraints, pos hcl.Pos) (ExprConstraints, hcl.Range) {
 	// TODO: Support middle-of-expression completion
+
+	// Ideally the edit range should always match the expression range
+	// but expression range in many cases includes the last newline character
+	// so we'd have to reinsert that character in the text edit.
+	// More importantly LSP does not support multi-line text edits.
+	// Overall this is not an issue (yet) as we don't support more complex
+	// completion in nested expressions
 
 	switch eType := expr.(type) {
 	case *hclsyntax.LiteralValueExpr:
@@ -31,6 +40,28 @@ func constraintsAtPos(expr hcl.Expression, constraints ExprConstraints, pos hcl.
 				Start:    eType.Range().Start,
 				End:      eType.Range().Start,
 				Filename: eType.Range().Filename,
+			}
+		}
+	case *hclsyntax.ScopeTraversalExpr:
+		matchedConstraints := make(ExprConstraints, 0)
+		ke, ok := constraints.KeywordExpr()
+		if ok {
+			matchedConstraints = append(matchedConstraints, ke)
+		}
+		te, ok := constraints.TraversalExpr()
+		if ok {
+			matchedConstraints = append(matchedConstraints, te)
+		}
+
+		if len(matchedConstraints) > 0 {
+			endPos := eType.Range().End
+			if pos.Byte-endPos.Byte == 1 {
+				endPos = pos
+			}
+			return matchedConstraints, hcl.Range{
+				Filename: eType.Range().Filename,
+				Start:    eType.Range().Start,
+				End:      endPos,
 			}
 		}
 	case *hclsyntax.TupleConsExpr:
@@ -120,18 +151,18 @@ func constraintsAtPos(expr hcl.Expression, constraints ExprConstraints, pos hcl.
 	return ExprConstraints{}, expr.Range()
 }
 
-func (d *Decoder) expressionCandidatesAtPos(constraints ExprConstraints, editRng hcl.Range) (lang.Candidates, error) {
+func (d *Decoder) expressionCandidatesAtPos(constraints ExprConstraints, outerBodyRng, prefixRng, editRng hcl.Range) (lang.Candidates, error) {
 	candidates := lang.NewCandidates()
 
 	for _, c := range constraints {
-		candidates.List = append(candidates.List, constraintToCandidates(c, editRng)...)
+		candidates.List = append(candidates.List, d.constraintToCandidates(c, outerBodyRng, prefixRng, editRng)...)
 	}
 
 	candidates.IsComplete = true
 	return candidates, nil
 }
 
-func constraintToCandidates(constraint schema.ExprConstraint, editRng hcl.Range) []lang.Candidate {
+func (d *Decoder) constraintToCandidates(constraint schema.ExprConstraint, outerBodyRng, prefixRng, editRng hcl.Range) []lang.Candidate {
 	candidates := make([]lang.Candidate, 0)
 
 	switch c := constraint.(type) {
@@ -153,6 +184,8 @@ func constraintToCandidates(constraint schema.ExprConstraint, editRng hcl.Range)
 				Range:   editRng,
 			},
 		})
+	case schema.TraversalExpr:
+		candidates = append(candidates, d.candidatesForTraversalConstraint(c, outerBodyRng, prefixRng, editRng)...)
 	case schema.TupleConsExpr:
 		candidates = append(candidates, lang.Candidate{
 			Label:       fmt.Sprintf(`[%s]`, labelForConstraints(c.AnyElem)),
@@ -255,6 +288,42 @@ func constraintToCandidates(constraint schema.ExprConstraint, editRng hcl.Range)
 	return candidates
 }
 
+func (d *Decoder) candidatesForTraversalConstraint(tc schema.TraversalExpr, outerBodyRng, prefixRng, editRng hcl.Range) []lang.Candidate {
+	candidates := make([]lang.Candidate, 0)
+
+	if d.refReader == nil {
+		return candidates
+	}
+
+	prefix, _ := d.bytesFromRange(prefixRng)
+
+	refs := References(d.refReader())
+	refs.Walk(func(ref lang.Reference) {
+		// avoid suggesting references to block's own fields from within (for now)
+		if ref.RangePtr != nil &&
+			(outerBodyRng.ContainsPos(ref.RangePtr.Start) ||
+				posEqual(outerBodyRng.End, ref.RangePtr.End)) {
+			return
+		}
+
+		if Reference(ref).MatchesConstraint(tc) && strings.HasPrefix(ref.Addr.String(), string(prefix)) {
+			candidates = append(candidates, lang.Candidate{
+				Label:       ref.Addr.String(),
+				Detail:      ref.FriendlyName(),
+				Description: ref.Description,
+				Kind:        lang.TraversalCandidateKind,
+				TextEdit: lang.TextEdit{
+					NewText: ref.Addr.String(),
+					Snippet: ref.Addr.String(),
+					Range:   editRng,
+				},
+			})
+		}
+	})
+
+	return candidates
+}
+
 func newTextForConstraints(cons schema.ExprConstraints, isNested bool) string {
 	for _, constraint := range cons {
 		switch c := constraint.(type) {
@@ -348,6 +417,8 @@ func labelForConstraints(cons schema.ExprConstraints) string {
 		case schema.LiteralValue:
 			continue
 		case schema.KeywordExpr:
+			labels += c.FriendlyName()
+		case schema.TraversalExpr:
 			labels += c.FriendlyName()
 		case schema.TupleConsExpr:
 			labels += fmt.Sprintf("[%s]", labelForConstraints(c.AnyElem))

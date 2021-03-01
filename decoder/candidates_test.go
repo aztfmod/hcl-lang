@@ -895,7 +895,8 @@ resource "random_resource" "test" {
 						NewText: "one",
 						Snippet: `one = "${1:value}"`,
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 				{
 					Label:  "three",
@@ -909,7 +910,8 @@ resource "random_resource" "test" {
 						NewText: "three",
 						Snippet: "three = ${1:false}",
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 				{
 					Label:  "two",
@@ -923,7 +925,8 @@ resource "random_resource" "test" {
 						NewText: "two",
 						Snippet: "two = ${1:1}",
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 			}),
 		},
@@ -943,7 +946,8 @@ resource "random_resource" "test" {
 						NewText: "one",
 						Snippet: `one = "${1:value}"`,
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 				{
 					Label:  "three",
@@ -957,7 +961,8 @@ resource "random_resource" "test" {
 						NewText: "three",
 						Snippet: "three = ${1:false}",
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 				{
 					Label:  "two",
@@ -971,7 +976,8 @@ resource "random_resource" "test" {
 						NewText: "two",
 						Snippet: "two = ${1:1}",
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 			}),
 		},
@@ -1046,7 +1052,8 @@ func TestDecoder_CandidatesAtPos_AnyAttribute(t *testing.T) {
 				NewText: "name",
 				Snippet: "name = {\n  source = \"${1:value}\"\n  version = \"${2:value}\"\n}",
 			},
-			Kind: lang.AttributeCandidateKind,
+			Kind:           lang.AttributeCandidateKind,
+			TriggerSuggest: true,
 		},
 	})
 
@@ -1118,7 +1125,8 @@ func TestDecoder_CandidatesAtPos_multipleTypes(t *testing.T) {
 				NewText: "for_each",
 				Snippet: "for_each = [ ${1} ]",
 			},
-			Kind: lang.AttributeCandidateKind,
+			Kind:           lang.AttributeCandidateKind,
+			TriggerSuggest: true,
 		},
 	})
 
@@ -1202,32 +1210,8 @@ resource "any" "ref" {
 						NewText: "count",
 						Snippet: "count = ${1:1}",
 					},
-					Kind: lang.AttributeCandidateKind,
-				},
-			}),
-		},
-		{
-			"new block or attribute inside a block",
-			`
-resource "any" "ref" {
-  co
-}
-`,
-			hcl.Pos{Line: 3, Column: 5, Byte: 28},
-			lang.CompleteCandidates([]lang.Candidate{
-				{
-					Label:  "count",
-					Detail: "Optional, number",
-					TextEdit: lang.TextEdit{
-						Range: hcl.Range{
-							Filename: "test.tf",
-							Start:    hcl.Pos{Line: 3, Column: 3, Byte: 26},
-							End:      hcl.Pos{Line: 3, Column: 5, Byte: 28},
-						},
-						NewText: "count",
-						Snippet: "count = ${1:1}",
-					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 			}),
 		},
@@ -1342,32 +1326,8 @@ resource "any" "ref" {
 						NewText: "count",
 						Snippet: "count = ${1:1}",
 					},
-					Kind: lang.AttributeCandidateKind,
-				},
-			}),
-		},
-		{
-			"new block or attribute inside a block",
-			`
-resource "any" "ref" {
-  co
-}
-`,
-			hcl.Pos{Line: 3, Column: 5, Byte: 28},
-			lang.CompleteCandidates([]lang.Candidate{
-				{
-					Label:  "count",
-					Detail: "Optional, number",
-					TextEdit: lang.TextEdit{
-						Range: hcl.Range{
-							Filename: "test.tf",
-							Start:    hcl.Pos{Line: 3, Column: 3, Byte: 26},
-							End:      hcl.Pos{Line: 3, Column: 5, Byte: 28},
-						},
-						NewText: "count",
-						Snippet: "count = ${1:1}",
-					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 			}),
 		},

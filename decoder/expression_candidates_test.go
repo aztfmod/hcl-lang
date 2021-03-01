@@ -787,7 +787,8 @@ func TestDecoder_CandidateAtPos_expressions(t *testing.T) {
 						NewText: "attr",
 						Snippet: "attr = [\n  ${0}\n]",
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 			}),
 		},
@@ -911,7 +912,8 @@ func TestDecoder_CandidateAtPos_expressions(t *testing.T) {
 						NewText: "attr",
 						Snippet: "attr = [\n  ${0}\n]",
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 			}),
 		},
@@ -1038,7 +1040,8 @@ func TestDecoder_CandidateAtPos_expressions(t *testing.T) {
 						NewText: "attr",
 						Snippet: "attr = [\n  ${0}\n]",
 					},
-					Kind: lang.AttributeCandidateKind,
+					Kind:           lang.AttributeCandidateKind,
+					TriggerSuggest: true,
 				},
 			}),
 		},
@@ -1279,6 +1282,441 @@ func TestDecoder_CandidateAtPos_expressions(t *testing.T) {
 			d := NewDecoder()
 			d.SetSchema(&schema.BodySchema{
 				Attributes: tc.attrSchema,
+			})
+
+			f, _ := hclsyntax.ParseConfig([]byte(tc.cfg), "test.tf", hcl.InitialPos)
+			err := d.LoadFile("test.tf", f)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			candidates, err := d.CandidatesAtPos("test.tf", tc.pos)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if diff := cmp.Diff(tc.expectedCandidates, candidates); diff != "" {
+				t.Fatalf("unexpected candidates: %s", diff)
+			}
+		})
+	}
+}
+
+func TestDecoder_CandidateAtPos_traversalExpressions(t *testing.T) {
+	testCases := []struct {
+		testName           string
+		bodySchema         *schema.BodySchema
+		builtinRefs        lang.References
+		cfg                string
+		pos                hcl.Pos
+		expectedCandidates lang.Candidates
+	}{
+		{
+			"no references",
+			&schema.BodySchema{
+				Attributes: map[string]*schema.AttributeSchema{
+					"attr": {
+						Expr: schema.ExprConstraints{
+							schema.TraversalExpr{OfType: cty.String},
+						},
+					},
+				},
+			},
+			lang.References{},
+			`attr = 
+`,
+			hcl.Pos{Line: 1, Column: 8, Byte: 7},
+			lang.ZeroCandidates(),
+		},
+		{
+			"no matching references",
+			&schema.BodySchema{
+				Attributes: map[string]*schema.AttributeSchema{
+					"attr": {
+						Expr: schema.ExprConstraints{
+							schema.TraversalExpr{OfType: cty.String},
+						},
+					},
+				},
+			},
+			lang.References{
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.RootStep{Name: "first"},
+					},
+					Type: cty.Bool,
+				},
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.RootStep{Name: "second"},
+					},
+					Type: cty.Number,
+				},
+			},
+			`attr = 
+`,
+			hcl.Pos{Line: 1, Column: 8, Byte: 7},
+			lang.ZeroCandidates(),
+		},
+		{
+			"type matching references",
+			&schema.BodySchema{
+				Attributes: map[string]*schema.AttributeSchema{
+					"attr": {
+						Expr: schema.ExprConstraints{
+							schema.TraversalExpr{OfType: cty.String},
+						},
+					},
+				},
+			},
+			lang.References{
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.AttrStep{Name: "first"},
+					},
+					Type: cty.Bool,
+				},
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.AttrStep{Name: "second"},
+					},
+					Type: cty.String,
+				},
+			},
+			`attr = 
+`,
+			hcl.Pos{Line: 1, Column: 8, Byte: 7},
+			lang.CompleteCandidates([]lang.Candidate{
+				{
+					Label:  "var.second",
+					Detail: "string",
+					TextEdit: lang.TextEdit{
+						Range: hcl.Range{
+							Filename: "test.tf",
+							Start: hcl.Pos{
+								Line:   1,
+								Column: 8,
+								Byte:   7,
+							},
+							End: hcl.Pos{
+								Line:   1,
+								Column: 8,
+								Byte:   7,
+							},
+						},
+						NewText: "var.second",
+						Snippet: "var.second",
+					},
+					Kind: lang.TraversalCandidateKind,
+				},
+			}),
+		},
+		{
+			"scope matching references",
+			&schema.BodySchema{
+				Attributes: map[string]*schema.AttributeSchema{
+					"attr": {
+						Expr: schema.ExprConstraints{
+							schema.TraversalExpr{OfScopeId: lang.ScopeId("test")},
+						},
+					},
+				},
+			},
+			lang.References{
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.AttrStep{Name: "first"},
+					},
+					ScopeId: lang.ScopeId("test"),
+				},
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.AttrStep{Name: "second"},
+					},
+					ScopeId: lang.ScopeId("second"),
+				},
+			},
+			`attr = 
+`,
+			hcl.Pos{Line: 1, Column: 8, Byte: 7},
+			lang.CompleteCandidates([]lang.Candidate{
+				{
+					Label:  "var.first",
+					Detail: "reference",
+					TextEdit: lang.TextEdit{
+						Range: hcl.Range{
+							Filename: "test.tf",
+							Start: hcl.Pos{
+								Line:   1,
+								Column: 8,
+								Byte:   7,
+							},
+							End: hcl.Pos{
+								Line:   1,
+								Column: 8,
+								Byte:   7,
+							},
+						},
+						NewText: "var.first",
+						Snippet: "var.first",
+					},
+					Kind: lang.TraversalCandidateKind,
+				},
+			}),
+		},
+		{
+			"range filtered references",
+			&schema.BodySchema{
+				Blocks: map[string]*schema.BlockSchema{
+					"custom": {
+						Labels: []*schema.LabelSchema{
+							{Name: "name"},
+						},
+						Body: &schema.BodySchema{
+							Attributes: map[string]*schema.AttributeSchema{
+								"greeting": {
+									Expr:       schema.LiteralTypeOnly(cty.String),
+									IsOptional: true,
+								},
+								"blah": {
+									Expr:       schema.LiteralTypeOnly(cty.Bool),
+									IsComputed: true,
+								},
+							},
+						},
+						Address: &schema.BlockAddrSchema{
+							Steps: []schema.AddrStep{
+								schema.StaticStep{Name: "custom"},
+								schema.LabelStep{Index: 0},
+							},
+							ScopeId:    lang.ScopeId("custom"),
+							BodyAsData: true,
+							InferBody:  true,
+						},
+					},
+					"another_block": {
+						Labels: []*schema.LabelSchema{
+							{Name: "name"},
+						},
+						Body: &schema.BodySchema{
+							Attributes: map[string]*schema.AttributeSchema{
+								"one": {
+									Expr: schema.ExprConstraints{
+										schema.TraversalExpr{OfType: cty.String},
+									},
+									IsOptional: true,
+								},
+							},
+						},
+					},
+				},
+			},
+			lang.References{},
+			`custom "test" {
+  greeting = "hello"
+}
+
+another_block "meh" {
+  one = 
+}
+`,
+			hcl.Pos{Line: 6, Column: 9, Byte: 70},
+			lang.CompleteCandidates([]lang.Candidate{
+				{
+					Label:  "custom.test.greeting",
+					Detail: "string",
+					TextEdit: lang.TextEdit{
+						Range: hcl.Range{
+							Filename: "test.tf",
+							Start: hcl.Pos{
+								Line:   6,
+								Column: 9,
+								Byte:   70,
+							},
+							End: hcl.Pos{
+								Line:   6,
+								Column: 9,
+								Byte:   70,
+							},
+						},
+						NewText: `custom.test.greeting`,
+						Snippet: `custom.test.greeting`,
+					},
+					Kind: lang.TraversalCandidateKind,
+				},
+			}),
+		},
+		{
+			"partially matching references before dot",
+			&schema.BodySchema{
+				Attributes: map[string]*schema.AttributeSchema{
+					"attr": {
+						Expr: schema.ExprConstraints{
+							schema.TraversalExpr{OfType: cty.String},
+						},
+					},
+				},
+			},
+			lang.References{
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.AttrStep{Name: "first"},
+					},
+					Type: cty.String,
+				},
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.AttrStep{Name: "second"},
+					},
+					Type: cty.String,
+				},
+			},
+			`attr = var
+`,
+			hcl.Pos{Line: 1, Column: 11, Byte: 10},
+			lang.CompleteCandidates([]lang.Candidate{
+				{
+					Label:  "var.first",
+					Detail: "string",
+					TextEdit: lang.TextEdit{
+						Range: hcl.Range{
+							Filename: "test.tf",
+							Start: hcl.Pos{
+								Line:   1,
+								Column: 8,
+								Byte:   7,
+							},
+							End: hcl.Pos{
+								Line:   1,
+								Column: 11,
+								Byte:   10,
+							},
+						},
+						NewText: "var.first",
+						Snippet: "var.first",
+					},
+					Kind: lang.TraversalCandidateKind,
+				},
+				{
+					Label:  "var.second",
+					Detail: "string",
+					TextEdit: lang.TextEdit{
+						Range: hcl.Range{
+							Filename: "test.tf",
+							Start: hcl.Pos{
+								Line:   1,
+								Column: 8,
+								Byte:   7,
+							},
+							End: hcl.Pos{
+								Line:   1,
+								Column: 11,
+								Byte:   10,
+							},
+						},
+						NewText: "var.second",
+						Snippet: "var.second",
+					},
+					Kind: lang.TraversalCandidateKind,
+				},
+			}),
+		},
+		{
+			"partially matching references after dot",
+			&schema.BodySchema{
+				Attributes: map[string]*schema.AttributeSchema{
+					"attr": {
+						Expr: schema.ExprConstraints{
+							schema.TraversalExpr{OfType: cty.String},
+						},
+					},
+				},
+			},
+			lang.References{
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.AttrStep{Name: "first"},
+					},
+					Type: cty.String,
+				},
+				lang.Reference{
+					Addr: lang.Address{
+						lang.RootStep{Name: "var"},
+						lang.AttrStep{Name: "second"},
+					},
+					Type: cty.String,
+				},
+			},
+			`attr = var.
+`,
+			hcl.Pos{Line: 1, Column: 12, Byte: 11},
+			lang.CompleteCandidates([]lang.Candidate{
+				{
+					Label:  "var.first",
+					Detail: "string",
+					TextEdit: lang.TextEdit{
+						Range: hcl.Range{
+							Filename: "test.tf",
+							Start: hcl.Pos{
+								Line:   1,
+								Column: 8,
+								Byte:   7,
+							},
+							End: hcl.Pos{
+								Line:   1,
+								Column: 12,
+								Byte:   11,
+							},
+						},
+						NewText: "var.first",
+						Snippet: "var.first",
+					},
+					Kind: lang.TraversalCandidateKind,
+				},
+				{
+					Label:  "var.second",
+					Detail: "string",
+					TextEdit: lang.TextEdit{
+						Range: hcl.Range{
+							Filename: "test.tf",
+							Start: hcl.Pos{
+								Line:   1,
+								Column: 8,
+								Byte:   7,
+							},
+							End: hcl.Pos{
+								Line:   1,
+								Column: 12,
+								Byte:   11,
+							},
+						},
+						NewText: "var.second",
+						Snippet: "var.second",
+					},
+					Kind: lang.TraversalCandidateKind,
+				},
+			}),
+		},
+	}
+
+	for i, tc := range testCases {
+		t.Run(fmt.Sprintf("%d-%s", i, tc.testName), func(t *testing.T) {
+			d := NewDecoder()
+			d.SetSchema(tc.bodySchema)
+			d.SetReferenceReader(func() lang.References {
+				bRefs := tc.builtinRefs
+				refs, _ := d.DecodeReferences()
+				refs = append(refs, bRefs...)
+				return refs
 			})
 
 			f, _ := hclsyntax.ParseConfig([]byte(tc.cfg), "test.tf", hcl.InitialPos)
